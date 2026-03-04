@@ -8,6 +8,7 @@ const CLEAR_SCREEN: &str = "\x1b[H\x1b[J";
 const STYLE_RESET: &str = "\x1b[0m";
 const AUTOWRAP_OFF: &str = "\x1b[?7l";
 const AUTOWRAP_ON: &str = "\x1b[?7h";
+const CURSOR_HIDE: &str = "\x1b[?25l";
 
 pub(crate) fn print_text_with_targets(
     capture_buffer: &str,
@@ -82,7 +83,15 @@ pub(crate) fn print_text_with_targets(
     // Disable autowrap during rendering to prevent double newlines in non-full-width panes,
     // then re-enable it afterward so normal terminal behavior is preserved.
     let mut stdout = io::stdout();
-    write!(stdout, "{}{}{}{}", AUTOWRAP_OFF, CLEAR_SCREEN, out.trim_end(), AUTOWRAP_ON)?;
+    write!(
+        stdout,
+        "{}{}{}{}{}",
+        CURSOR_HIDE,
+        AUTOWRAP_OFF,
+        CLEAR_SCREEN,
+        out.trim_end(),
+        AUTOWRAP_ON
+    )?;
     stdout.flush()
 }
 
