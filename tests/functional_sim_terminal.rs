@@ -414,3 +414,131 @@ fn functional_emoji_first_column_with_simulated_terminal() {
     thread::sleep(Duration::from_millis(50));
     let _ = fs::remove_dir_all(base);
 }
+
+#[test]
+fn functional_j_motion_with_emoji_with_simulated_terminal() {
+    let base = tmp_path("j_motion_emoji");
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+
+    let capture_file = base.join("capture.out");
+    let jump_pipe = base.join("jump.pipe");
+    let target_pipe = base.join("target.pipe");
+
+    // Test j motion with emoji on first line
+    // Cursor is on line 0 column 6 (first column of emoji)
+    fs::write(&capture_file, "hello 🖊 world\nline 2\nline 3\n").unwrap();
+    mkfifo(&jump_pipe, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+    mkfifo(&target_pipe, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+
+    let pty = openpty(None, None).unwrap();
+    let stdin_file = File::from(pty.slave);
+    let stdout_file = stdin_file.try_clone().unwrap();
+    let stderr_file = stdin_file.try_clone().unwrap();
+
+    let jump_pipe_reader = jump_pipe.clone();
+    let reader_handle = thread::spawn(move || {
+        let file = OpenOptions::new()
+            .read(true)
+            .open(jump_pipe_reader)
+            .unwrap();
+        let mut reader = BufReader::new(file);
+
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        first
+    });
+
+    // Test "j" motion (forward line motion) from cursor at emoji position
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tmux-easy-motion"))
+        .arg("fg=colour242")
+        .arg("fg=colour196,bold")
+        .arg("fg=brightyellow,bold")
+        .arg("fg=yellow,bold")
+        .arg("j")
+        .arg("")
+        .arg("as")
+        .arg("0:6")
+        .arg("80:24")
+        .arg(&capture_file)
+        .arg(&jump_pipe)
+        .arg(&target_pipe)
+        .stdin(Stdio::from(stdin_file))
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .unwrap();
+
+    let status = child.wait().unwrap();
+    assert!(status.success());
+
+    let first_output = reader_handle.join().unwrap();
+    assert!(first_output.trim() == "single-target" || first_output.trim() == "ready");
+
+    thread::sleep(Duration::from_millis(50));
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn functional_k_motion_with_emoji_with_simulated_terminal() {
+    let base = tmp_path("k_motion_emoji");
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+
+    let capture_file = base.join("capture.out");
+    let jump_pipe = base.join("jump.pipe");
+    let target_pipe = base.join("target.pipe");
+
+    // Test k motion with emoji on second line
+    // Cursor is on line 1 column 6 (first column of emoji)
+    fs::write(&capture_file, "line 1\nhello 🖊 world\nline 3\n").unwrap();
+    mkfifo(&jump_pipe, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+    mkfifo(&target_pipe, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+
+    let pty = openpty(None, None).unwrap();
+    let stdin_file = File::from(pty.slave);
+    let stdout_file = stdin_file.try_clone().unwrap();
+    let stderr_file = stdin_file.try_clone().unwrap();
+
+    let jump_pipe_reader = jump_pipe.clone();
+    let reader_handle = thread::spawn(move || {
+        let file = OpenOptions::new()
+            .read(true)
+            .open(jump_pipe_reader)
+            .unwrap();
+        let mut reader = BufReader::new(file);
+
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        first
+    });
+
+    // Test "k" motion (backward line motion) from cursor at emoji position
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tmux-easy-motion"))
+        .arg("fg=colour242")
+        .arg("fg=colour196,bold")
+        .arg("fg=brightyellow,bold")
+        .arg("fg=yellow,bold")
+        .arg("k")
+        .arg("")
+        .arg("as")
+        .arg("1:6")
+        .arg("80:24")
+        .arg(&capture_file)
+        .arg(&jump_pipe)
+        .arg(&target_pipe)
+        .stdin(Stdio::from(stdin_file))
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .unwrap();
+
+    let status = child.wait().unwrap();
+    assert!(status.success());
+
+    let first_output = reader_handle.join().unwrap();
+    assert!(first_output.trim() == "single-target" || first_output.trim() == "ready");
+
+    thread::sleep(Duration::from_millis(50));
+    let _ = fs::remove_dir_all(base);
+}

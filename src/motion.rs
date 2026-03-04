@@ -1,4 +1,4 @@
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthChar;
 
@@ -174,7 +174,13 @@ fn find_latest_line_start(cursor_pos: usize, text: &str) -> usize {
         return text.rfind('\n').map(|i| i + 1).unwrap_or(0);
     }
     
-    text[..=cursor_pos]
+    // Find the next character boundary to avoid splitting multi-byte chars
+    let mut end_pos = cursor_pos + 1;
+    while end_pos < text.len() && !text.is_char_boundary(end_pos) {
+        end_pos += 1;
+    }
+    
+    text[..end_pos]
         .rfind('\n')
         .map(|index| index + 1)
         .unwrap_or(0)
@@ -275,7 +281,18 @@ pub(crate) fn motion_to_indices(
     } else {
         template.to_string()
     };
-    let regex = Regex::new(&pattern).map_err(|e| e.to_string())?;
+    
+    // Enable multi_line mode for linewise motions (j, k, J, K, bd-j, bd-J)
+    // so that ^ and $ match line boundaries instead of just string boundaries
+    let regex = if linewise_motions().contains(base_motion.as_str()) {
+        RegexBuilder::new(&pattern)
+            .multi_line(true)
+            .build()
+            .map_err(|e| e.to_string())?
+    } else {
+        Regex::new(&pattern).map_err(|e| e.to_string())?
+    };
+    
     let mut caps: Vec<_> = regex.captures_iter(&adjusted).collect();
     if !is_forward {
         caps.reverse();
