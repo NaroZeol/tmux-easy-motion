@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+EASY_MOTION_PREFIX_DEFAULT="Space"
+EASY_MOTION_DIM_STYLE_DEFAULT="fg=colour242"
+EASY_MOTION_HIGHLIGHT_STYLE_DEFAULT="fg=colour196,bold"
+EASY_MOTION_HIGHLIGHT_2_FIRST_STYLE_DEFAULT="fg=brightyellow,bold"
+EASY_MOTION_HIGHLIGHT_2_SECOND_STYLE_DEFAULT="fg=yellow,bold"
+EASY_MOTION_TARGET_KEYS_DEFAULT="asdghklqwertyuiopzxcvbnmfj;"
+EASY_MOTION_VERBOSE_DEFAULT="0"
+EASY_MOTION_AUTO_BEGIN_SELECTION_DEFAULT="0"
+
+read_options() {
+    EASY_MOTION_PREFIX="$(tmux show-option -gqv @easy-motion-prefix)"
+    EASY_MOTION_COPY_MODE_PREFIX="$(tmux show-option -gqv @easy-motion-copy-mode-prefix)"
+    EASY_MOTION_DIM_STYLE="$(tmux show-option -gqv @easy-motion-dim-style)"
+    EASY_MOTION_HIGHLIGHT_STYLE="$(tmux show-option -gqv @easy-motion-highlight-style)"
+    EASY_MOTION_HIGHLIGHT_2_FIRST_STYLE="$(tmux show-option -gqv @easy-motion-highlight-2-first-style)"
+    EASY_MOTION_HIGHLIGHT_2_SECOND_STYLE="$(tmux show-option -gqv @easy-motion-highlight-2-second-style)"
+    EASY_MOTION_TARGET_KEYS="$(tmux show-option -gqv @easy-motion-target-keys)"
+    EASY_MOTION_VERBOSE="$(tmux show-option -gqv @easy-motion-verbose)"
+    EASY_MOTION_AUTO_BEGIN_SELECTION="$(tmux show-option -gqv @easy-motion-auto-begin-selection)"
+
+    [[ -n "${EASY_MOTION_PREFIX}" ]] || EASY_MOTION_PREFIX="${EASY_MOTION_PREFIX_DEFAULT}"
+    [[ -n "${EASY_MOTION_COPY_MODE_PREFIX}" ]] || EASY_MOTION_COPY_MODE_PREFIX="${EASY_MOTION_PREFIX_DEFAULT}"
+    [[ -n "${EASY_MOTION_DIM_STYLE}" ]] || EASY_MOTION_DIM_STYLE="${EASY_MOTION_DIM_STYLE_DEFAULT}"
+    [[ -n "${EASY_MOTION_HIGHLIGHT_STYLE}" ]] || EASY_MOTION_HIGHLIGHT_STYLE="${EASY_MOTION_HIGHLIGHT_STYLE_DEFAULT}"
+    [[ -n "${EASY_MOTION_HIGHLIGHT_2_FIRST_STYLE}" ]] || EASY_MOTION_HIGHLIGHT_2_FIRST_STYLE="${EASY_MOTION_HIGHLIGHT_2_FIRST_STYLE_DEFAULT}"
+    [[ -n "${EASY_MOTION_HIGHLIGHT_2_SECOND_STYLE}" ]] || EASY_MOTION_HIGHLIGHT_2_SECOND_STYLE="${EASY_MOTION_HIGHLIGHT_2_SECOND_STYLE_DEFAULT}"
+    [[ -n "${EASY_MOTION_TARGET_KEYS}" ]] || EASY_MOTION_TARGET_KEYS="${EASY_MOTION_TARGET_KEYS_DEFAULT}"
+    [[ -n "${EASY_MOTION_VERBOSE}" ]] || EASY_MOTION_VERBOSE="${EASY_MOTION_VERBOSE_DEFAULT}"
+    [[ -n "${EASY_MOTION_AUTO_BEGIN_SELECTION}" ]] || EASY_MOTION_AUTO_BEGIN_SELECTION="${EASY_MOTION_AUTO_BEGIN_SELECTION_DEFAULT}"
+}

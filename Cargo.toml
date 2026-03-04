@@ -1,0 +1,12 @@
+[package]
+name = "tmux-easy-motion"
+version = "0.1.0"
+edition = "2021"
+description = "Rust core implementation of tmux easy-motion behavior"
+readme = "README.md"
+keywords = ["tmux", "terminal", "vim", "navigation", "motion"]
+categories = ["command-line-utilities", "text-editors"]
+
+[dependencies]
+regex = "1.11"
+nix = { version = "0.29", features = ["term", "fs"] }
