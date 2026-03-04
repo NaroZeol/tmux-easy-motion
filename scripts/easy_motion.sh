@@ -44,15 +44,28 @@ detect_platform() {
 }
 
 download_binary() {
-    local platform binary_url
+    local platform binary_url release_json
     platform="$(detect_platform)" || return 1
 
-    # Query latest release and find matching binary asset
+    # Query latest release
     if ! command -v curl >/dev/null 2>&1; then
         return 1
     fi
 
-    binary_url=$(curl -s "${GITHUB_RELEASE_API}" | grep -o "\"browser_download_url\": \"[^\"]*tmux-easy-motion-${platform}\"" | head -1 | grep -o "https[^\"]*")
+    release_json=$(curl -s "${GITHUB_RELEASE_API}")
+    
+    if [[ -z "${release_json}" ]]; then
+        return 1
+    fi
+
+    # Try to extract download URL using jq if available, otherwise use grep/sed
+    if command -v jq >/dev/null 2>&1; then
+        binary_url=$(echo "${release_json}" | jq -r ".assets[] | select(.name | contains(\"${platform}\")) | .browser_download_url" | head -1)
+    else
+        # Fallback to grep parsing for systems without jq
+        # Find the asset block that contains our platform name, then extract browser_download_url
+        binary_url=$(echo "${release_json}" | grep -A 60 "\"name\": \"tmux-easy-motion-${platform}\"" | grep "browser_download_url" | grep -o "https[^\"]*" | head -1)
+    fi
     
     if [[ -z "${binary_url}" ]]; then
         return 1
@@ -85,20 +98,23 @@ ensure_binary_exists() {
         return 0
     fi
 
-    # Try downloading from GitHub release first
+    # Try downloading from GitHub release first (preferred for TPM installations)
     if download_binary; then
         return 0
     fi
 
-    # Fallback to local build
-    if build_binary_locally; then
-        if [[ -x "${BINARY_PATH}" ]]; then
-            return 0
+    # If EASY_MOTION_ALLOW_BUILD is explicitly set to 1, attempt local build
+    # Otherwise, just fail and tell user to download/reinstall
+    if [[ "${EASY_MOTION_ALLOW_BUILD}" == "1" ]]; then
+        if build_binary_locally; then
+            if [[ -x "${BINARY_PATH}" ]]; then
+                return 0
+            fi
         fi
     fi
 
-    # Both attempts failed
-    tmux display-message "tmux-easy-motion: unable to obtain binary (GitHub download failed, local build unavailable)"
+    # Both download and (optional) build failed
+    tmux display-message "tmux-easy-motion: binary not found at ${BINARY_PATH}. Please run 'cd ${ROOT_DIR} && cargo build --release' or reinstall the plugin."
     return 1
 }
 
