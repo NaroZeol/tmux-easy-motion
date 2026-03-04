@@ -6,6 +6,7 @@ description = "Rust core implementation of tmux easy-motion behavior"
 readme = "README.md"
 keywords = ["tmux", "terminal", "vim", "navigation", "motion"]
 categories = ["command-line-utilities", "text-editors"]
+license = "MIT"
 
 [dependencies]
 regex = "1.11"

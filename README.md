@@ -199,3 +199,9 @@ Users will then download these pre-compiled binaries on first plugin invocation.
 
 - This repository aims for behavior parity with the original workflow while using a Rust executable for the core logic.
 - If you find behavior differences, open an issue with tmux version, reproduction steps, and expected output.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2026 NaroZeol
