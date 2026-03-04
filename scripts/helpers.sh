@@ -38,9 +38,24 @@ ensure_target_key_pipe_exists() {
     server_pid="$1"
     session_id="$2"
     target_key_pipe_tmp_directory="$(get_target_key_pipe_tmp_directory "${server_pid}" "${session_id}" create)" || return 1
+    if [[ -e "${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}" && ! -p "${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}" ]]; then
+        rm -f "${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}" || return 1
+    fi
     if [[ ! -p "${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}" ]]; then
         mkfifo "${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}"
     fi
+}
+
+reset_target_key_pipe() {
+    local server_pid session_id target_key_pipe_tmp_directory target_key_pipe
+    server_pid="$1"
+    session_id="$2"
+
+    target_key_pipe_tmp_directory="$(get_target_key_pipe_tmp_directory "${server_pid}" "${session_id}" create)" || return 1
+    target_key_pipe="${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}"
+
+    rm -f "${target_key_pipe}" || return 1
+    mkfifo "${target_key_pipe}" || return 1
 }
 
 get_tmux_server_pid() {
@@ -73,8 +88,8 @@ create_empty_swap_pane() {
     session_id="$1"
     pane_id="$2"
     
-    # Create new window with empty pane
-    swap_window_id=$(tmux new-window -t "${session_id}" -P -d -F "#{window_id}" -n "[easy-motion]" "bash --norc --noprofile")
+    # Create new window with a silent placeholder process
+    swap_window_id=$(tmux new-window -t "${session_id}" -P -d -F "#{window_id}" -n "[easy-motion]" "tail -f /dev/null")
     swap_pane_id=$(tmux list-panes -t "${swap_window_id}" -F "#{pane_id}" | head -1)
     
     echo "${swap_window_id}:${swap_pane_id}"
@@ -101,7 +116,7 @@ set_cursor_position() {
     IFS=':' read -r row col <<< "${row_col}"
     IFS=':' read -r current_row current_col <<< "$(read_cursor_position "${pane_id}")"
     rel_row="$(( row - current_row ))"
-    tmux copy-mode -t "${pane_id}"
+    
     if (( rel_row < 0 )); then
         tmux send-keys -t "${pane_id}" -X -N "$(( -rel_row ))" cursor-up
     elif (( rel_row > 0 )); then

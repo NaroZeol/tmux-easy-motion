@@ -5,20 +5,9 @@ use crate::grouping::generate_jump_targets;
 use crate::types::{GroupedIndices, JumpTargetType};
 
 const CLEAR_SCREEN: &str = "\x1b[H\x1b[J";
-const POSITION_CURSOR: &str = "\x1b[{};{}H";
 const STYLE_RESET: &str = "\x1b[0m";
-
-pub(crate) fn position_cursor(row: usize, col: usize) -> io::Result<()> {
-    let mut out = io::stdout();
-    write!(
-        out,
-        "{}",
-        POSITION_CURSOR
-            .replace("{}", &(row + 1).to_string())
-            .replacen("{}", &(col + 1).to_string(), 1)
-    )?;
-    out.flush()
-}
+const AUTOWRAP_OFF: &str = "\x1b[?7l";
+const AUTOWRAP_ON: &str = "\x1b[?7h";
 
 pub(crate) fn print_text_with_targets(
     capture_buffer: &str,
@@ -90,8 +79,10 @@ pub(crate) fn print_text_with_targets(
         out.push_str(STYLE_RESET);
     }
 
+    // Disable autowrap during rendering to prevent double newlines in non-full-width panes,
+    // then re-enable it afterward so normal terminal behavior is preserved.
     let mut stdout = io::stdout();
-    write!(stdout, "{}{}", CLEAR_SCREEN, out.trim_end())?;
+    write!(stdout, "{}{}{}{}", AUTOWRAP_OFF, CLEAR_SCREEN, out.trim_end(), AUTOWRAP_ON)?;
     stdout.flush()
 }
 

@@ -124,29 +124,70 @@ main() {
     capture_file="${capture_tmp_directory}/${CAPTURE_PANE_FILENAME}"
     jump_pipe="${capture_tmp_directory}/${JUMP_COMMAND_PIPENAME}"
 
-    # Capture pane content and setup before entering copy-mode
+    # Capture pane content - always use viewport (visible content)
+    # This ensures consistent coordinate space with terminal rendering
     tmux capture-pane -t "${pane_id}" -p > "${capture_file}" || return 1
     mkfifo "${jump_pipe}" || return 1
 
-    # Enter copy-mode on original pane
+    # Save cursor position before entering copy-mode if already in it
+    local saved_cursor=""
+    local pane_in_mode
+    pane_in_mode="$(tmux display-message -p -t "${pane_id}" "#{pane_in_mode}")"
+    if [[ "${pane_in_mode}" == "1" ]]; then
+        saved_cursor="$(read_cursor_position "${pane_id}")"
+    fi
+    
+    # Always enter copy-mode (safe even if already in it)
     tmux copy-mode -t "${pane_id}" || return 1
     
-    cursor_pos="$(read_cursor_position "${pane_id}")"
-    pane_size="$(tmux display-message -p -t "${pane_id}" "#{pane_width}:#{pane_height}")"
+    # Restore original cursor position if we were already in copy-mode
+    # This maintains consistency between capture buffer and cursor location
+    if [[ -n "${saved_cursor}" ]]; then
+        set_cursor_position "${pane_id}" "${saved_cursor}"
+    fi
+    
+    # Read cursor position and clamp to pane dimensions immediately
+    # This ensures all subsequent coordinate calculations are consistent
+    local cursor_row cursor_col pane_width
+    local raw_cursor
+    raw_cursor="$(read_cursor_position "${pane_id}")"
+    IFS=':' read -r cursor_row cursor_col <<< "${raw_cursor}"
+    pane_width="$(tmux display-message -p -t "${pane_id}" "#{pane_width}")"
+    
+    # Clamp column to pane width for non-full-width panes
+    # capture-pane can only get content up to pane_width columns
+    if (( cursor_col >= pane_width )); then
+        cursor_col=$((pane_width - 1))
+        # Move cursor to clamped position so capture/cursor align
+        set_cursor_position "${pane_id}" "${cursor_row}:${cursor_col}"
+    fi
+    
+    cursor_pos="${cursor_row}:${cursor_col}"
+    
+    # For split panes (non-full-width), get actual pane width from tmux
+    # capture-pane truncates lines to pane width, so we must use tmux's width
+    local pane_width
+    pane_width="$(tmux display-message -p -t "${pane_id}" "#{pane_width}")"
+    
+    # Calculate pane height from capture buffer
+    local pane_height
+    pane_height=$(wc -l < "${capture_file}")
+    
+    pane_size="${pane_width}:${pane_height}"
 
     # Create swap pane for showing selection interface
     swap_ids="$(create_empty_swap_pane "${session_id}" "${window_id}" "${pane_id}")" || return 1
     swap_window_id="$(cut -d: -f1 <<< "${swap_ids}")"
     swap_pane_id="$(cut -d: -f2 <<< "${swap_ids}")"
     
-    ensure_target_key_pipe_exists "${server_pid}" "${session_id}" || return 1
+    reset_target_key_pipe "${server_pid}" "${session_id}" || return 1
     target_key_pipe_tmp_directory="$(get_target_key_pipe_tmp_directory "${server_pid}" "${session_id}")" || return 1
     target_key_pipe="${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}"
 
     # Swap to swap_pane and set key table
-    tmux swap-pane -s "${swap_pane_id}" -t "${pane_id}"
+    tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
     tmux set-window-option -t "${swap_pane_id}" key-table easy-motion-target
-    tmux switch-client -t "${swap_pane_id}" -T easy-motion-target
+    tmux switch-client -T easy-motion-target
 
     # Get pane_tty from swap_pane (which now displays on screen)
     local pane_tty
@@ -172,15 +213,16 @@ main() {
         read -r ready_command || {
             # User cancelled, swap back without jumping
             tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -t "${swap_pane_id}" -T root
-            tmux swap-pane -s "${swap_pane_id}" -t "${pane_id}"
+            tmux switch-client -T root
+            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
             tmux kill-window -t "${swap_window_id}"
             return 0
         }
         if [[ "${ready_command}" != "ready" && "${ready_command}" != "single-target" ]]; then
             tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -t "${swap_pane_id}" -T root
-            tmux swap-pane -s "${swap_pane_id}" -t "${pane_id}"
+            tmux switch-client -T root
+            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+
             tmux kill-window -t "${swap_window_id}"
             return 0
         fi
@@ -188,16 +230,16 @@ main() {
         read -r jump_command || {
             # User cancelled at selection, swap back
             tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -t "${swap_pane_id}" -T root
-            tmux swap-pane -s "${swap_pane_id}" -t "${pane_id}"
+            tmux switch-client -T root
+            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
             tmux kill-window -t "${swap_window_id}"
             return 0
         }
         
         if [[ "$(awk '{ print $1 }' <<< "${jump_command}")" != "jump" ]]; then
             tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -t "${swap_pane_id}" -T root
-            tmux swap-pane -s "${swap_pane_id}" -t "${pane_id}"
+            tmux switch-client -T root
+            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
             tmux kill-window -t "${swap_window_id}"
             return 0
         fi
@@ -206,8 +248,8 @@ main() {
         
         # Swap back to original pane (which is still in copy-mode)
         tmux set-window-option -t "${swap_pane_id}" key-table root
-        tmux switch-client -t "${pane_id}" -T root
-        tmux swap-pane -s "${swap_pane_id}" -t "${pane_id}"
+        tmux switch-client -T root
+        tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
         
         # Now set cursor position (pane_id is back to original pane in copy-mode)
         set_cursor_position "${pane_id}" "${jump_cursor_position}"

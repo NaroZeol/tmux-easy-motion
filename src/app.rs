@@ -5,7 +5,7 @@ use std::process::Command;
 use crate::config::parse_arguments;
 use crate::grouping::group_indices;
 use crate::motion::{convert_row_col_to_text_pos, convert_text_pos_to_row_col, motion_to_indices};
-use crate::render::{position_cursor, print_jump_target, print_ready, print_single_target, print_text_with_targets};
+use crate::render::{print_jump_target, print_ready, print_single_target, print_text_with_targets};
 use crate::terminal::TerminalGuard;
 use crate::types::{Config, GroupedIndices};
 
@@ -79,7 +79,6 @@ fn handle_user_input(config: &Config) -> Result<(), String> {
                     pane_width,
                 )
                 .map_err(|e| e.to_string())?;
-                position_cursor(row, col).map_err(|e| e.to_string())?;
                 if first_highlight {
                     print_ready(&mut command_pipe).map_err(|e| e.to_string())?;
                     first_highlight = false;
