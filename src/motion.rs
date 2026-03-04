@@ -63,24 +63,36 @@ pub(crate) fn convert_row_col_to_text_pos(row: usize, col: usize, text: &str) ->
     }
     let row = row.min(lines.len() - 1);
     let row_line = lines[row];
-    let col = if row_line.is_empty() {
-        0
-    } else {
-        col.min(row_line.len() - 1)
-    };
-    let mut pos = lines.iter().take(row).map(|line| line.len()).sum::<usize>();
-    pos += col;
-    pos + row
+    
+    // Convert character column to byte offset
+    let char_col = col.min(row_line.chars().count().saturating_sub(1));
+    let byte_col = row_line
+        .char_indices()
+        .nth(char_col)
+        .map(|(i, _)| i)
+        .unwrap_or(row_line.len());
+    
+    // Calculate byte position: sum of all previous lines (including newlines) + column offset
+    let mut pos = 0;
+    for line in lines.iter().take(row) {
+        pos += line.len() + 1; // +1 for newline
+    }
+    pos + byte_col
 }
 
 pub(crate) fn convert_text_pos_to_row_col(text_pos: usize, text: &str) -> Result<(usize, usize), String> {
     let lines: Vec<&str> = text.split('\n').collect();
     let mut current = 0;
     for (row, line) in lines.iter().enumerate() {
-        if current + line.len() > text_pos {
-            return Ok((row, text_pos - current));
+        if current + line.len() >= text_pos {
+            let byte_col = text_pos - current;
+            // Convert byte offset back to character column
+            let char_col = line[..byte_col]
+                .chars()
+                .count();
+            return Ok((row, char_col));
         }
-        current += line.len() + 1;
+        current += line.len() + 1; // +1 for newline
     }
     Err(format!(
         "The text position \"{}\" is out of range.",
