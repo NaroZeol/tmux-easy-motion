@@ -11,3 +11,4 @@ license = "MIT"
 [dependencies]
 regex = "1.11"
 nix = { version = "0.29", features = ["term", "fs"] }
+unicode-width = "0.1"

@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::collections::HashSet;
+use unicode_width::UnicodeWidthChar;
 
 fn forward_motions() -> HashSet<&'static str> {
     [
@@ -64,20 +65,58 @@ pub(crate) fn convert_row_col_to_text_pos(row: usize, col: usize, text: &str) ->
     let row = row.min(lines.len() - 1);
     let row_line = lines[row];
     
-    // Convert character column to byte offset
-    let char_col = col.min(row_line.chars().count().saturating_sub(1));
-    let byte_col = row_line
-        .char_indices()
-        .nth(char_col)
-        .map(|(i, _)| i)
-        .unwrap_or(row_line.len());
+    // Convert display column to byte offset
+    // tmux reports cursor position in display columns (considering character width)
+    let byte_col = if row_line.is_empty() {
+        0
+    } else {
+        // Find the character at the given display column
+        let mut display_col = 0;
+        let mut byte_offset = 0;
+        let mut found = false;
+        
+        for (byte_idx, ch) in row_line.char_indices() {
+            // Get the display width of this character (1 for most, 2 for CJK/emoji, 0 for combining)
+            let char_width = ch.width().unwrap_or(1);
+            
+            // Check if target column falls within this character's display range
+            // For example, if emoji at display_col 6 has width 2, it occupies columns 6 and 7
+            if col >= display_col && col < display_col + char_width {
+                byte_offset = byte_idx;
+                found = true;
+                break;
+            }
+            
+            display_col += char_width;
+        }
+        
+        // If we've processed all chars and haven't found the column, clamp to end of line
+        if !found {
+            row_line.len()
+        } else {
+            byte_offset
+        }
+    };
     
     // Calculate byte position: sum of all previous lines (including newlines) + column offset
     let mut pos = 0;
     for line in lines.iter().take(row) {
         pos += line.len() + 1; // +1 for newline
     }
-    pos + byte_col
+    let result_pos = pos + byte_col;
+    
+    // Ensure the result is at a valid UTF-8 character boundary
+    let valid_pos = result_pos.min(text.len());
+    if text.is_char_boundary(valid_pos) {
+        valid_pos
+    } else {
+        // This should rarely happen now, but keep as safety net
+        let mut adj_pos = valid_pos;
+        while adj_pos > 0 && !text.is_char_boundary(adj_pos) {
+            adj_pos -= 1;
+        }
+        adj_pos
+    }
 }
 
 pub(crate) fn convert_text_pos_to_row_col(text_pos: usize, text: &str) -> Result<(usize, usize), String> {
@@ -86,11 +125,19 @@ pub(crate) fn convert_text_pos_to_row_col(text_pos: usize, text: &str) -> Result
     for (row, line) in lines.iter().enumerate() {
         if current + line.len() >= text_pos {
             let byte_col = text_pos - current;
-            // Convert byte offset back to character column
-            let char_col = line[..byte_col]
-                .chars()
-                .count();
-            return Ok((row, char_col));
+            
+            // Find the nearest valid UTF-8 boundary if byte_col is in the middle of a character
+            let mut valid_byte_col = byte_col;
+            while valid_byte_col > 0 && !is_char_boundary(line, valid_byte_col) {
+                valid_byte_col -= 1;
+            }
+            
+            // Convert byte offset to display column (accounting for character width)
+            let mut display_col = 0;
+            for ch in line[..valid_byte_col].chars() {
+                display_col += ch.width().unwrap_or(1);
+            }
+            return Ok((row, display_col));
         }
         current += line.len() + 1; // +1 for newline
     }
@@ -100,13 +147,33 @@ pub(crate) fn convert_text_pos_to_row_col(text_pos: usize, text: &str) -> Result
     ))
 }
 
+fn is_char_boundary(s: &str, index: usize) -> bool {
+    if index > s.len() {
+        return false;
+    }
+    if index == 0 || index == s.len() {
+        return true;
+    }
+    s.is_char_boundary(index)
+}
+
 fn find_first_line_end(cursor_pos: usize, text: &str) -> usize {
+    // cursor_pos is guaranteed to be at a valid boundary from convert_row_col_to_text_pos
+    if cursor_pos >= text.len() {
+        return 0;
+    }
+    
     text[cursor_pos..]
         .find('\n')
         .unwrap_or(text.len() - cursor_pos)
 }
 
 fn find_latest_line_start(cursor_pos: usize, text: &str) -> usize {
+    // cursor_pos is guaranteed to be at a valid boundary from convert_row_col_to_text_pos
+    if cursor_pos >= text.len() {
+        return text.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    }
+    
     text[..=cursor_pos]
         .rfind('\n')
         .map(|index| index + 1)
@@ -119,23 +186,42 @@ fn adjust_text(
     is_forward_motion: bool,
     motion: &str,
 ) -> (String, isize) {
+    // cursor_pos is guaranteed to be at a valid UTF-8 boundary from convert_row_col_to_text_pos
+    let safe_pos = cursor_pos.min(text.len());
+    
     let mut offset: isize = 0;
     let linewise = linewise_motions().contains(motion);
     let adjusted = if is_forward_motion {
         if linewise {
-            let first_end = find_first_line_end(cursor_pos, text);
-            offset = (cursor_pos + first_end) as isize;
-            text[cursor_pos + first_end..].to_string()
+            let first_end = find_first_line_end(safe_pos, text);
+            offset = (safe_pos + first_end) as isize;
+            text[safe_pos + first_end..].to_string()
         } else {
-            offset = cursor_pos as isize;
-            format!("{} ", &text[cursor_pos..])
+            offset = safe_pos as isize;
+            if safe_pos < text.len() {
+                format!("{} ", &text[safe_pos..])
+            } else {
+                " ".to_string()
+            }
         }
     } else if linewise {
-        let latest_start = find_latest_line_start(cursor_pos, text);
+        let latest_start = find_latest_line_start(safe_pos, text);
         text[..latest_start].to_string()
     } else {
         offset = -1;
-        format!(" {}", &text[..=cursor_pos])
+        if safe_pos < text.len() {
+            // For backward motion, we need to include the character at cursor position
+            // Find the next character boundary after safe_pos to avoid splitting multi-byte chars
+            let mut end_pos = safe_pos + 1;
+            while end_pos < text.len() && !text.is_char_boundary(end_pos) {
+                end_pos += 1;
+            }
+            format!(" {}", &text[..end_pos])
+        } else if !text.is_empty() {
+            format!(" {}", text)
+        } else {
+            " ".to_string()
+        }
     };
     (adjusted, offset)
 }
