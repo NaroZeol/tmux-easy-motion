@@ -1,6 +1,8 @@
 # tmux-easy-motion (Rust)
 
-A Rust reimplementation of tmux easy-motion behavior, based on the original plugin design.
+A Rust reimplementation of [tmux-easy-motion](https://github.com/IngoMeyer441/tmux-easy-motion), based on the original plugin design.
+
+100% vibe coding
 
 ## Features
 
