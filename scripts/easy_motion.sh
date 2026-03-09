@@ -144,6 +144,26 @@ emit_runner_error() {
     return 0
 }
 
+show_swap_ui() {
+    local swap_pane_id pane_id
+    swap_pane_id="$1"
+    pane_id="$2"
+
+    tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}" || return 1
+    tmux set-window-option -t "${swap_pane_id}" key-table easy-motion-target || return 1
+    tmux switch-client -T easy-motion-target >/dev/null 2>&1 || true
+}
+
+restore_original_pane() {
+    local swap_pane_id pane_id
+    swap_pane_id="$1"
+    pane_id="$2"
+
+    tmux set-window-option -t "${swap_pane_id}" key-table root || return 1
+    tmux switch-client -T root >/dev/null 2>&1 || true
+    tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}" || return 1
+}
+
 ensure_binary_exists() {
     if [[ -x "${BINARY_PATH}" ]]; then
         return 0
@@ -173,7 +193,7 @@ main() {
     local server_pid session_id window_id pane_id motion motion_argument
     local capture_tmp_directory capture_file jump_pipe target_key_pipe_tmp_directory target_key_pipe runner_script runner_stderr
     local cursor_pos pane_size ready_command jump_command jump_cursor_position
-    local swap_window_id swap_pane_id swap_ids
+    local swap_window_id swap_pane_id swap_ids ui_visible
 
     server_pid="$1"
     session_id="$2"
@@ -246,6 +266,7 @@ main() {
     swap_ids="$(create_empty_swap_pane "${session_id}" "${window_id}" "${pane_id}")" || return 1
     swap_window_id="$(cut -d: -f1 <<< "${swap_ids}")"
     swap_pane_id="$(cut -d: -f2 <<< "${swap_ids}")"
+    ui_visible=0
     
     reset_target_key_pipe "${server_pid}" "${session_id}" || return 1
     target_key_pipe_tmp_directory="$(get_target_key_pipe_tmp_directory "${server_pid}" "${session_id}")" || return 1
@@ -263,71 +284,64 @@ main() {
         "${jump_pipe}" \
         "${target_key_pipe}" || return 1
 
-    # Swap to swap_pane and set key table
-    tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
-    tmux set-window-option -t "${swap_pane_id}" key-table easy-motion-target
-    tmux switch-client -T easy-motion-target
-
-    # Run Rust program as the swap pane's foreground process so tmux owns the PTY.
+    # Run Rust program in the hidden swap pane first.
+    # Once it reports ready, swap the pane into view so users never see the blank placeholder.
     tmux respawn-pane -k -t "${swap_pane_id}" "${runner_script}" || return 1
 
     {
         read -r ready_command || {
             if emit_runner_error "${runner_stderr}"; then
-                tmux set-window-option -t "${swap_pane_id}" key-table root
-                tmux switch-client -T root
-                tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
                 tmux kill-window -t "${swap_window_id}"
                 return 1
             fi
-            # User cancelled, swap back without jumping
-            tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -T root
-            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+            # Runner exited before showing any UI.
             tmux kill-window -t "${swap_window_id}"
             return 0
         }
-        if [[ "${ready_command}" != "ready" && "${ready_command}" != "single-target" ]]; then
+        if [[ "${ready_command}" == "ready" ]]; then
+            show_swap_ui "${swap_pane_id}" "${pane_id}" || {
+                tmux kill-window -t "${swap_window_id}"
+                return 1
+            }
+            ui_visible=1
+        elif [[ "${ready_command}" != "single-target" ]]; then
             emit_runner_error "${runner_stderr}" || true
-            tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -T root
-            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
-
             tmux kill-window -t "${swap_window_id}"
             return 0
         fi
         
         read -r jump_command || {
             if emit_runner_error "${runner_stderr}"; then
-                tmux set-window-option -t "${swap_pane_id}" key-table root
-                tmux switch-client -T root
-                tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+                if (( ui_visible )); then
+                    restore_original_pane "${swap_pane_id}" "${pane_id}" || true
+                fi
                 tmux kill-window -t "${swap_window_id}"
                 return 1
             fi
-            # User cancelled at selection, swap back
-            tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -T root
-            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+            if (( ui_visible )); then
+                restore_original_pane "${swap_pane_id}" "${pane_id}" || true
+            fi
             tmux kill-window -t "${swap_window_id}"
             return 0
         }
         
         if [[ "$(awk '{ print $1 }' <<< "${jump_command}")" != "jump" ]]; then
             emit_runner_error "${runner_stderr}" || true
-            tmux set-window-option -t "${swap_pane_id}" key-table root
-            tmux switch-client -T root
-            tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+            if (( ui_visible )); then
+                restore_original_pane "${swap_pane_id}" "${pane_id}" || true
+            fi
             tmux kill-window -t "${swap_window_id}"
             return 0
         fi
         
         jump_cursor_position="$(awk '{ print $2 }' <<< "${jump_command}")"
         
-        # Swap back to original pane (which is still in copy-mode)
-        tmux set-window-option -t "${swap_pane_id}" key-table root
-        tmux switch-client -T root
-        tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+        if (( ui_visible )); then
+            restore_original_pane "${swap_pane_id}" "${pane_id}" || {
+                tmux kill-window -t "${swap_window_id}"
+                return 1
+            }
+        fi
 
         # Some tmux/terminal combinations can drop copy-mode during the swap lifecycle.
         # Re-enter it explicitly before applying the computed jump.
