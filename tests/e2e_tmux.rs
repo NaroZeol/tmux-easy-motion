@@ -135,6 +135,30 @@ fn create_tmux_wrapper(base: &Path, socket_name: &str) -> PathBuf {
     wrapper_dir
 }
 
+fn install_fake_bsd_mktemp(wrapper_dir: &Path) {
+    let wrapper = wrapper_dir.join("mktemp");
+    let real_mktemp = Command::new("sh")
+        .arg("-lc")
+        .arg("command -v mktemp")
+        .output()
+        .expect("failed to locate mktemp");
+    let mktemp_path = String::from_utf8_lossy(&real_mktemp.stdout).trim().to_string();
+
+    let script = format!(
+        "#!/usr/bin/env bash\nif [[ \"$1\" == \"-d\" && $# -eq 1 ]]; then\n  echo \"mktemp: illegal option usage\" >&2\n  exit 1\nfi\nexec {} \"$@\"\n",
+        shell_single_quote(&mktemp_path),
+    );
+    fs::write(&wrapper, script).unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&wrapper).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&wrapper, perms).unwrap();
+    }
+}
+
 fn tmux_display(socket_name: &str, target: &str, fmt: &str) -> String {
     run_tmux(
         socket_name,
@@ -470,6 +494,43 @@ fn e2e_easy_motion_sh_k_single_target() {
 
     let base = tmp_path("e2e-wrapper");
     let wrapper_dir = create_tmux_wrapper(&base, &socket_name);
+
+    move_copy_cursor(&socket_name, &pane_id, 1, 0);
+    run_easy_motion_sh(
+        &repo_root,
+        &wrapper_dir,
+        &server_pid,
+        &session_id,
+        &window_id,
+        &pane_id,
+        "k",
+        "",
+    );
+
+    assert_copy_cursor(&socket_name, &pane_id, 0, 0);
+
+    cleanup_tmux(&socket_name);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn e2e_easy_motion_sh_uses_portable_mktemp_template() {
+    if !tmux_available() {
+        eprintln!("Skipping e2e tmux test because tmux is not available");
+        return;
+    }
+
+    let repo_root = locate_repo_root();
+    ensure_release_binary_exists(&repo_root);
+
+    let socket_name = unique_name("tmux-e2e-sock");
+    let session_name = unique_name("tmux-e2e-session");
+    let (pane_id, session_id, window_id, server_pid) =
+        prepare_isolated_pane(&socket_name, &session_name, "first\nsecond\n");
+
+    let base = tmp_path("e2e-wrapper");
+    let wrapper_dir = create_tmux_wrapper(&base, &socket_name);
+    install_fake_bsd_mktemp(&wrapper_dir);
 
     move_copy_cursor(&socket_name, &pane_id, 1, 0);
     run_easy_motion_sh(

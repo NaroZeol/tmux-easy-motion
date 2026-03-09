@@ -93,6 +93,14 @@ build_binary_locally() {
     return 1
 }
 
+create_temp_dir() {
+    local tmp_parent template
+    tmp_parent="${TMPDIR:-/tmp}"
+    tmp_parent="${tmp_parent%/}"
+    template="${tmp_parent}/tmux-easy-motion.XXXXXXXXXX"
+    mktemp -d "${template}"
+}
+
 write_swap_runner_script() {
     local runner_script runner_stderr motion motion_argument cursor_pos pane_size capture_file jump_pipe target_key_pipe
     runner_script="$1"
@@ -177,7 +185,7 @@ main() {
     ensure_binary_exists || return 1
     read_options || return 1
 
-    capture_tmp_directory="$(mktemp -d)" || return 1
+    capture_tmp_directory="$(create_temp_dir)" || return 1
     trap 'rm -rf "${capture_tmp_directory}"' EXIT
 
     capture_file="${capture_tmp_directory}/${CAPTURE_PANE_FILENAME}"
