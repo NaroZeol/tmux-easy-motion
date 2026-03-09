@@ -8,16 +8,36 @@ on:
 
 jobs:
   e2e-tmux:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            install_tmux: |
+              sudo apt-get update
+              sudo apt-get install -y tmux
+          - os: ubuntu-24.04-arm
+            name: linux-aarch64
+            install_tmux: |
+              sudo apt-get update
+              sudo apt-get install -y tmux
+          - os: macos-14
+            name: macos-aarch64
+            install_tmux: |
+              brew install tmux
+
+    name: e2e-tmux (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install tmux
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tmux
+        run: ${{ matrix.install_tmux }}
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -26,4 +46,4 @@ jobs:
         run: cargo build --release
 
       - name: Run isolated tmux end-to-end tests
-        run: timeout 180 cargo test --test e2e_tmux -- --test-threads=1 --nocapture
+        run: cargo test --test e2e_tmux -- --test-threads=1 --nocapture
