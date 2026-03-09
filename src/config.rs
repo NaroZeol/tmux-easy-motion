@@ -120,13 +120,13 @@ fn parse_pair(raw: &str, label: &str, format: &str) -> Result<(usize, usize), St
             label, raw, format
         ));
     }
-    let left = parts[0].parse::<usize>().map_err(|_| {
+    let left = parts[0].trim().parse::<usize>().map_err(|_| {
         format!(
             "The {} \"{}\" is not in the format \"{}\".",
             label, raw, format
         )
     })?;
-    let right = parts[1].parse::<usize>().map_err(|_| {
+    let right = parts[1].trim().parse::<usize>().map_err(|_| {
         format!(
             "The {} \"{}\" is not in the format \"{}\".",
             label, raw, format
@@ -227,4 +227,15 @@ fn color_to_code(color: &str, bg: bool) -> Result<String, String> {
         ansi += 10;
     }
     Ok(format!("\x1b[{}m", ansi))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pair;
+
+    #[test]
+    fn parse_pair_accepts_whitespace_around_numbers() {
+        assert_eq!(parse_pair("150:           35", "pane size", "<width>:<height>"), Ok((150, 35)));
+        assert_eq!(parse_pair(" 3 : 7 ", "cursor position", "<row>:<col>"), Ok((3, 7)));
+    }
 }

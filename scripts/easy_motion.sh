@@ -211,7 +211,7 @@ main() {
     local raw_cursor
     raw_cursor="$(read_cursor_position "${pane_id}")"
     IFS=':' read -r cursor_row cursor_col <<< "${raw_cursor}"
-    pane_width="$(tmux display-message -p -t "${pane_id}" "#{pane_width}")"
+    pane_width="$(tmux display-message -p -t "${pane_id}" "#{pane_width}" | awk '{print $1}')"
     
     # Clamp column to pane width for non-full-width panes
     # capture-pane can only get content up to pane_width columns
@@ -226,11 +226,11 @@ main() {
     # For split panes (non-full-width), get actual pane width from tmux
     # capture-pane truncates lines to pane width, so we must use tmux's width
     local pane_width
-    pane_width="$(tmux display-message -p -t "${pane_id}" "#{pane_width}")"
+    pane_width="$(tmux display-message -p -t "${pane_id}" "#{pane_width}" | awk '{print $1}')"
     
     # Calculate pane height from capture buffer
     local pane_height
-    pane_height=$(wc -l < "${capture_file}")
+    pane_height="$(wc -l < "${capture_file}" | awk '{print $1}')"
     
     pane_size="${pane_width}:${pane_height}"
 
