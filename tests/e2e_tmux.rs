@@ -355,6 +355,67 @@ fn assert_copy_cursor(socket_name: &str, pane_id: &str, row: usize, col: usize) 
     assert_eq!(pos, format!("{}:{}", row, col));
 }
 
+struct MotionCase {
+    name: &'static str,
+    content: &'static str,
+    start_row: usize,
+    start_col: usize,
+    motion: &'static str,
+    motion_argument: &'static str,
+    injected_key: Option<&'static str>,
+    expected_row: usize,
+    expected_col: usize,
+}
+
+fn assert_motion_case(case: &MotionCase) {
+    let repo_root = locate_repo_root();
+    ensure_release_binary_exists(&repo_root);
+
+    let socket_name = unique_name(&format!("tmux-e2e-sock-{}", case.name));
+    let session_name = unique_name(&format!("tmux-e2e-session-{}", case.name));
+    let (pane_id, session_id, window_id, server_pid) =
+        prepare_isolated_pane(&socket_name, &session_name, case.content);
+
+    let base = tmp_path(&format!("e2e-wrapper-{}", case.name));
+    let wrapper_dir = create_tmux_wrapper(&base, &socket_name);
+
+    move_copy_cursor(&socket_name, &pane_id, case.start_row, case.start_col);
+    match case.injected_key {
+        Some(key) => run_easy_motion_sh_with_injected_key(
+            &repo_root,
+            &wrapper_dir,
+            &server_pid,
+            &session_id,
+            &window_id,
+            &pane_id,
+            case.motion,
+            case.motion_argument,
+            Some(key),
+        ),
+        None => run_easy_motion_sh(
+            &repo_root,
+            &wrapper_dir,
+            &server_pid,
+            &session_id,
+            &window_id,
+            &pane_id,
+            case.motion,
+            case.motion_argument,
+        ),
+    }
+
+    let pos = tmux_display(&socket_name, &pane_id, "#{copy_cursor_y}:#{copy_cursor_x}");
+    assert_eq!(
+        pos,
+        format!("{}:{}", case.expected_row, case.expected_col),
+        "motion case {} failed",
+        case.name,
+    );
+
+    cleanup_tmux(&socket_name);
+    let _ = fs::remove_dir_all(base);
+}
+
 #[test]
 fn e2e_easy_motion_sh_j_single_target() {
     if !tmux_available() {
@@ -672,4 +733,331 @@ fn e2e_easy_motion_sh_j_selects_prompt_line() {
 
     cleanup_tmux(&socket_name);
     let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn e2e_easy_motion_sh_single_target_motion_matrix() {
+    if !tmux_available() {
+        eprintln!("Skipping e2e tmux test because tmux is not available");
+        return;
+    }
+
+    let cases = [
+        MotionCase {
+            name: "b",
+            content: "alpha beta\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "b",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 0,
+        },
+        MotionCase {
+            name: "B",
+            content: "alpha beta\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "B",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 0,
+        },
+        MotionCase {
+            name: "ge",
+            content: "alpha beta\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "ge",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 4,
+        },
+        MotionCase {
+            name: "gE",
+            content: "alpha beta\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "gE",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 4,
+        },
+        MotionCase {
+            name: "e",
+            content: "alpha\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "e",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 4,
+        },
+        MotionCase {
+            name: "E",
+            content: "alpha\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "E",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 4,
+        },
+        MotionCase {
+            name: "w",
+            content: "alpha beta\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "w",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 6,
+        },
+        MotionCase {
+            name: "W",
+            content: "alpha beta\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "W",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 6,
+        },
+        MotionCase {
+            name: "j",
+            content: "top\nmid\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "j",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 1,
+            expected_col: 0,
+        },
+        MotionCase {
+            name: "J",
+            content: "top\nmid  \n",
+            start_row: 0,
+            start_col: 0,
+            motion: "J",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 1,
+            expected_col: 2,
+        },
+        MotionCase {
+            name: "k",
+            content: "top\nmid\n",
+            start_row: 1,
+            start_col: 0,
+            motion: "k",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 0,
+        },
+        MotionCase {
+            name: "K",
+            content: "top\nmid  \n",
+            start_row: 1,
+            start_col: 0,
+            motion: "K",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 2,
+        },
+        MotionCase {
+            name: "f",
+            content: "abxc\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "f",
+            motion_argument: "x",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 2,
+        },
+        MotionCase {
+            name: "F",
+            content: "axbc\n",
+            start_row: 0,
+            start_col: 3,
+            motion: "F",
+            motion_argument: "x",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 1,
+        },
+        MotionCase {
+            name: "t",
+            content: "abxc\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "t",
+            motion_argument: "x",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 1,
+        },
+        MotionCase {
+            name: "T",
+            content: "axbc\n",
+            start_row: 0,
+            start_col: 3,
+            motion: "T",
+            motion_argument: "x",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 2,
+        },
+        MotionCase {
+            name: "bd-f2",
+            content: "abxycd\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "bd-f2",
+            motion_argument: "xy",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 2,
+        },
+        MotionCase {
+            name: "c",
+            content: "foo_bar\n",
+            start_row: 0,
+            start_col: 0,
+            motion: "c",
+            motion_argument: "",
+            injected_key: None,
+            expected_row: 0,
+            expected_col: 4,
+        },
+    ];
+
+    for case in &cases {
+        assert_motion_case(case);
+    }
+}
+
+#[test]
+fn e2e_easy_motion_sh_multi_target_motion_matrix() {
+    if !tmux_available() {
+        eprintln!("Skipping e2e tmux test because tmux is not available");
+        return;
+    }
+
+    let cases = [
+        MotionCase {
+            name: "bd-w",
+            content: "alpha beta gamma\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "bd-w",
+            motion_argument: "",
+            injected_key: Some("a"),
+            expected_row: 0,
+            expected_col: 11,
+        },
+        MotionCase {
+            name: "bd-W",
+            content: "alpha beta gamma\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "bd-W",
+            motion_argument: "",
+            injected_key: Some("a"),
+            expected_row: 0,
+            expected_col: 11,
+        },
+        MotionCase {
+            name: "bd-e",
+            content: "alpha beta gamma\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "bd-e",
+            motion_argument: "",
+            injected_key: Some("a"),
+            expected_row: 0,
+            expected_col: 9,
+        },
+        MotionCase {
+            name: "bd-E",
+            content: "alpha beta gamma\n",
+            start_row: 0,
+            start_col: 6,
+            motion: "bd-E",
+            motion_argument: "",
+            injected_key: Some("a"),
+            expected_row: 0,
+            expected_col: 9,
+        },
+        MotionCase {
+            name: "bd-j",
+            content: "one\ntwo\nthree\n",
+            start_row: 1,
+            start_col: 0,
+            motion: "bd-j",
+            motion_argument: "",
+            injected_key: Some("a"),
+            expected_row: 2,
+            expected_col: 0,
+        },
+        MotionCase {
+            name: "bd-J",
+            content: "one\ntwo\nthree  \n",
+            start_row: 1,
+            start_col: 0,
+            motion: "bd-J",
+            motion_argument: "",
+            injected_key: Some("a"),
+            expected_row: 2,
+            expected_col: 4,
+        },
+        MotionCase {
+            name: "bd-f",
+            content: "axbxc\n",
+            start_row: 0,
+            start_col: 2,
+            motion: "bd-f",
+            motion_argument: "x",
+            injected_key: Some("a"),
+            expected_row: 0,
+            expected_col: 3,
+        },
+        MotionCase {
+            name: "bd-t",
+            content: "axbxc\n",
+            start_row: 0,
+            start_col: 1,
+            motion: "bd-t",
+            motion_argument: "x",
+            injected_key: Some("a"),
+            expected_row: 0,
+            expected_col: 2,
+        },
+        MotionCase {
+            name: "bd-T",
+            content: "axbcxd\n",
+            start_row: 0,
+            start_col: 3,
+            motion: "bd-T",
+            motion_argument: "x",
+            injected_key: Some("a"),
+            expected_row: 0,
+            expected_col: 5,
+        },
+    ];
+
+    for case in &cases {
+        assert_motion_case(case);
+    }
 }
