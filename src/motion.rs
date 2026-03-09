@@ -313,3 +313,37 @@ pub(crate) fn motion_to_indices(
     }
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{convert_row_col_to_text_pos, motion_to_indices};
+
+    #[test]
+    fn j_motion_handles_two_line_prompt_text() {
+        let text = "alpha\nbeta\ntmux-easy-motion on  main 🖊\n❯ ";
+        let cursor = convert_row_col_to_text_pos(0, 0, text);
+
+        let indices = motion_to_indices(cursor, text, "j", None).unwrap();
+
+        let expected: Vec<usize> = vec![
+            text.find("beta").unwrap(),
+            text.find("tmux-easy-motion").unwrap(),
+            text.find("❯").unwrap(),
+        ];
+        assert_eq!(indices, expected);
+    }
+
+    #[test]
+    fn k_motion_handles_two_line_prompt_text() {
+        let text = "build ok\ntmux-easy-motion on  main 🖊\n❯ ";
+        let cursor = convert_row_col_to_text_pos(2, 0, text);
+
+        let indices = motion_to_indices(cursor, text, "k", None).unwrap();
+
+        let expected: Vec<usize> = vec![
+            text.find("tmux-easy-motion").unwrap(),
+            text.find("build ok").unwrap(),
+        ];
+        assert_eq!(indices, expected);
+    }
+}

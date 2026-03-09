@@ -10,6 +10,27 @@ const AUTOWRAP_OFF: &str = "\x1b[?7l";
 const AUTOWRAP_ON: &str = "\x1b[?7h";
 const CURSOR_HIDE: &str = "\x1b[?25l";
 
+fn previous_char_boundary(text: &str, index: usize) -> usize {
+    let mut boundary = index.min(text.len());
+    while boundary > 0 && !text.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    boundary
+}
+
+fn next_char_boundary(text: &str, index: usize) -> Option<usize> {
+    let start = index.min(text.len());
+    let mut boundary = start;
+    while boundary < text.len() && !text.is_char_boundary(boundary) {
+        boundary += 1;
+    }
+    if boundary >= text.len() {
+        return None;
+    }
+    let ch = text[boundary..].chars().next()?;
+    Some(boundary + ch.len_utf8())
+}
+
 pub(crate) fn print_text_with_targets(
     capture_buffer: &str,
     grouped_indices: &GroupedIndices,
@@ -31,8 +52,9 @@ pub(crate) fn print_text_with_targets(
     });
 
     let mut out = String::new();
-    let mut previous_text_pos: isize = -1;
-    for (target_type, text_pos, target_key) in jump_targets {
+    let mut previous_text_end = 0;
+    for (target_type, raw_text_pos, target_key) in jump_targets {
+        let text_pos = previous_char_boundary(capture_buffer, raw_text_pos);
         if text_pos >= capture_buffer.len() {
             continue;
         }
@@ -42,7 +64,7 @@ pub(crate) fn print_text_with_targets(
             append_to_buffer = true;
         } else {
             append_extra_newline = true;
-            let window_start = text_pos.saturating_sub(terminal_width + 1);
+            let window_start = previous_char_boundary(capture_buffer, text_pos.saturating_sub(terminal_width + 1));
             let slice = &capture_buffer[window_start..text_pos];
             if slice.rfind('\n').is_some() {
                 append_to_buffer = true;
@@ -50,12 +72,14 @@ pub(crate) fn print_text_with_targets(
         }
 
         if append_to_buffer {
-            if text_pos as isize > previous_text_pos + 1 {
+            let slice_start = previous_char_boundary(capture_buffer, previous_text_end);
+            let slice_end = previous_char_boundary(capture_buffer, text_pos);
+            if slice_end > slice_start {
                 out.push_str(dim_style);
-                out.push_str(&capture_buffer[(previous_text_pos + 1) as usize..text_pos]);
+                out.push_str(&capture_buffer[slice_start..slice_end]);
                 out.push_str(STYLE_RESET);
             }
-            if text_pos as isize > previous_text_pos {
+            if slice_end >= slice_start {
                 let color = match target_type {
                     JumpTargetType::Direct => highlight_style,
                     JumpTargetType::Group => highlight_2_first_style,
@@ -69,11 +93,10 @@ pub(crate) fn print_text_with_targets(
         if append_extra_newline {
             out.push('\n');
         }
-        previous_text_pos = text_pos as isize;
+        previous_text_end = next_char_boundary(capture_buffer, text_pos).unwrap_or(capture_buffer.len());
     }
 
-    let rest_start = (previous_text_pos + 1).max(0) as usize;
-    let rest = capture_buffer[rest_start..].trim_end();
+    let rest = capture_buffer[previous_text_end..].trim_end();
     if !rest.is_empty() {
         out.push_str(dim_style);
         out.push_str(rest);

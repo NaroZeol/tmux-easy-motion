@@ -151,6 +151,8 @@ The integration-style terminal simulation tests are in `tests/functional_sim_ter
 4. User key input is streamed through target-key pipe.
 5. Rust emits `jump row:col`; script restores original pane and moves the copy-mode cursor.
 
+The temporary selection UI is rendered by respawning the swap pane with the Rust binary as that pane's foreground process. This avoids writing directly to `#{pane_tty}` and is more reliable across terminal implementations such as iTerm2.
+
 ## Development
 
 Build release binary:

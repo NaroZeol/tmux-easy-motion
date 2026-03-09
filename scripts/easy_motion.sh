@@ -93,6 +93,49 @@ build_binary_locally() {
     return 1
 }
 
+write_swap_runner_script() {
+    local runner_script runner_stderr motion motion_argument cursor_pos pane_size capture_file jump_pipe target_key_pipe
+    runner_script="$1"
+    runner_stderr="$2"
+    motion="$3"
+    motion_argument="$4"
+    cursor_pos="$5"
+    pane_size="$6"
+    capture_file="$7"
+    jump_pipe="$8"
+    target_key_pipe="$9"
+
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf '%q \\\n' "${BINARY_PATH}"
+        printf '    %q \\\n' "${EASY_MOTION_DIM_STYLE}"
+        printf '    %q \\\n' "${EASY_MOTION_HIGHLIGHT_STYLE}"
+        printf '    %q \\\n' "${EASY_MOTION_HIGHLIGHT_2_FIRST_STYLE}"
+        printf '    %q \\\n' "${EASY_MOTION_HIGHLIGHT_2_SECOND_STYLE}"
+        printf '    %q \\\n' "${motion}"
+        printf '    %q \\\n' "${motion_argument}"
+        printf '    %q \\\n' "${EASY_MOTION_TARGET_KEYS}"
+        printf '    %q \\\n' "${cursor_pos}"
+        printf '    %q \\\n' "${pane_size}"
+        printf '    %q \\\n' "${capture_file}"
+        printf '    %q \\\n' "${jump_pipe}"
+        printf '    %q' "${target_key_pipe}"
+        printf ' 2>%q\n' "${runner_stderr}"
+        printf 'exec tail -f /dev/null\n'
+    } > "${runner_script}" || return 1
+
+    chmod +x "${runner_script}" || return 1
+}
+
+emit_runner_error() {
+    local runner_stderr
+    runner_stderr="$1"
+
+    [[ -s "${runner_stderr}" ]] || return 1
+    cat "${runner_stderr}" >&2
+    return 0
+}
+
 ensure_binary_exists() {
     if [[ -x "${BINARY_PATH}" ]]; then
         return 0
@@ -120,7 +163,7 @@ ensure_binary_exists() {
 
 main() {
     local server_pid session_id window_id pane_id motion motion_argument
-    local capture_tmp_directory capture_file jump_pipe target_key_pipe_tmp_directory target_key_pipe
+    local capture_tmp_directory capture_file jump_pipe target_key_pipe_tmp_directory target_key_pipe runner_script runner_stderr
     local cursor_pos pane_size ready_command jump_command jump_cursor_position
     local swap_window_id swap_pane_id swap_ids
 
@@ -199,34 +242,36 @@ main() {
     reset_target_key_pipe "${server_pid}" "${session_id}" || return 1
     target_key_pipe_tmp_directory="$(get_target_key_pipe_tmp_directory "${server_pid}" "${session_id}")" || return 1
     target_key_pipe="${target_key_pipe_tmp_directory}/${TARGET_KEY_PIPENAME}"
+    runner_script="${capture_tmp_directory}/run_binary.sh"
+    runner_stderr="${capture_tmp_directory}/run_binary.stderr"
+    write_swap_runner_script \
+        "${runner_script}" \
+        "${runner_stderr}" \
+        "${motion}" \
+        "${motion_argument}" \
+        "${cursor_pos}" \
+        "${pane_size}" \
+        "${capture_file}" \
+        "${jump_pipe}" \
+        "${target_key_pipe}" || return 1
 
     # Swap to swap_pane and set key table
     tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
     tmux set-window-option -t "${swap_pane_id}" key-table easy-motion-target
     tmux switch-client -T easy-motion-target
 
-    # Get pane_tty from swap_pane (which now displays on screen)
-    local pane_tty
-    pane_tty="$(tmux display-message -p -t "${swap_pane_id}" "#{pane_tty}")"
-
-    # Run Rust program in swap pane
-    "${BINARY_PATH}" \
-        "${EASY_MOTION_DIM_STYLE}" \
-        "${EASY_MOTION_HIGHLIGHT_STYLE}" \
-        "${EASY_MOTION_HIGHLIGHT_2_FIRST_STYLE}" \
-        "${EASY_MOTION_HIGHLIGHT_2_SECOND_STYLE}" \
-        "${motion}" \
-        "${motion_argument}" \
-        "${EASY_MOTION_TARGET_KEYS}" \
-        "${cursor_pos}" \
-        "${pane_size}" \
-        "${capture_file}" \
-        "${jump_pipe}" \
-        "${target_key_pipe}" \
-        < /dev/null > "${pane_tty}" 2>/dev/null &
+    # Run Rust program as the swap pane's foreground process so tmux owns the PTY.
+    tmux respawn-pane -k -t "${swap_pane_id}" "${runner_script}" || return 1
 
     {
         read -r ready_command || {
+            if emit_runner_error "${runner_stderr}"; then
+                tmux set-window-option -t "${swap_pane_id}" key-table root
+                tmux switch-client -T root
+                tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+                tmux kill-window -t "${swap_window_id}"
+                return 1
+            fi
             # User cancelled, swap back without jumping
             tmux set-window-option -t "${swap_pane_id}" key-table root
             tmux switch-client -T root
@@ -235,6 +280,7 @@ main() {
             return 0
         }
         if [[ "${ready_command}" != "ready" && "${ready_command}" != "single-target" ]]; then
+            emit_runner_error "${runner_stderr}" || true
             tmux set-window-option -t "${swap_pane_id}" key-table root
             tmux switch-client -T root
             tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
@@ -244,6 +290,13 @@ main() {
         fi
         
         read -r jump_command || {
+            if emit_runner_error "${runner_stderr}"; then
+                tmux set-window-option -t "${swap_pane_id}" key-table root
+                tmux switch-client -T root
+                tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+                tmux kill-window -t "${swap_window_id}"
+                return 1
+            fi
             # User cancelled at selection, swap back
             tmux set-window-option -t "${swap_pane_id}" key-table root
             tmux switch-client -T root
@@ -253,6 +306,7 @@ main() {
         }
         
         if [[ "$(awk '{ print $1 }' <<< "${jump_command}")" != "jump" ]]; then
+            emit_runner_error "${runner_stderr}" || true
             tmux set-window-option -t "${swap_pane_id}" key-table root
             tmux switch-client -T root
             tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
@@ -266,6 +320,10 @@ main() {
         tmux set-window-option -t "${swap_pane_id}" key-table root
         tmux switch-client -T root
         tmux swap-pane -Z -s "${swap_pane_id}" -t "${pane_id}"
+
+        # Some tmux/terminal combinations can drop copy-mode during the swap lifecycle.
+        # Re-enter it explicitly before applying the computed jump.
+        tmux copy-mode -t "${pane_id}" || return 1
         
         # Now set cursor position (pane_id is back to original pane in copy-mode)
         set_cursor_position "${pane_id}" "${jump_cursor_position}"

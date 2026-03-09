@@ -252,7 +252,14 @@ fn run_easy_motion_sh_with_injected_key(
 
     let status = wait_child_with_timeout(&mut child, Duration::from_secs(15))
         .expect("easy_motion.sh timed out");
-    assert!(status.success(), "easy_motion.sh exited with non-zero status");
+    if !status.success() {
+        let mut stderr = String::new();
+        if let Some(mut pipe) = child.stderr.take() {
+            use std::io::Read;
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        panic!("easy_motion.sh exited with non-zero status: {}", stderr.trim());
+    }
 }
 
 fn sanitize_session_id(session_id: &str) -> String {
@@ -546,6 +553,122 @@ fn e2e_easy_motion_sh_auto_begin_selection_enabled() {
     .unwrap();
     let selection = tmux_display(&socket_name, &pane_id, "#{selection_present}");
     assert_eq!(selection, "1");
+
+    cleanup_tmux(&socket_name);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn e2e_easy_motion_sh_single_quote_argument() {
+    if !tmux_available() {
+        eprintln!("Skipping e2e tmux test because tmux is not available");
+        return;
+    }
+
+    let repo_root = locate_repo_root();
+    ensure_release_binary_exists(&repo_root);
+
+    let socket_name = unique_name("tmux-e2e-sock");
+    let session_name = unique_name("tmux-e2e-session");
+    let (pane_id, session_id, window_id, server_pid) =
+        prepare_isolated_pane(&socket_name, &session_name, "foo ' bar\n");
+
+    let base = tmp_path("e2e-wrapper");
+    let wrapper_dir = create_tmux_wrapper(&base, &socket_name);
+
+    move_copy_cursor(&socket_name, &pane_id, 0, 0);
+    run_easy_motion_sh(
+        &repo_root,
+        &wrapper_dir,
+        &server_pid,
+        &session_id,
+        &window_id,
+        &pane_id,
+        "f",
+        "'",
+    );
+
+    assert_copy_cursor(&socket_name, &pane_id, 0, 4);
+
+    cleanup_tmux(&socket_name);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn e2e_easy_motion_sh_k_from_prompt_line() {
+    if !tmux_available() {
+        eprintln!("Skipping e2e tmux test because tmux is not available");
+        return;
+    }
+
+    let repo_root = locate_repo_root();
+    ensure_release_binary_exists(&repo_root);
+
+    let socket_name = unique_name("tmux-e2e-sock");
+    let session_name = unique_name("tmux-e2e-session");
+    let (pane_id, session_id, window_id, server_pid) = prepare_isolated_pane(
+        &socket_name,
+        &session_name,
+        "build ok\ntmux-easy-motion on  main 🖊\n❯ ",
+    );
+
+    let base = tmp_path("e2e-wrapper");
+    let wrapper_dir = create_tmux_wrapper(&base, &socket_name);
+
+    move_copy_cursor(&socket_name, &pane_id, 2, 0);
+    run_easy_motion_sh_with_injected_key(
+        &repo_root,
+        &wrapper_dir,
+        &server_pid,
+        &session_id,
+        &window_id,
+        &pane_id,
+        "k",
+        "",
+        Some("a"),
+    );
+
+    assert_copy_cursor(&socket_name, &pane_id, 1, 0);
+
+    cleanup_tmux(&socket_name);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn e2e_easy_motion_sh_j_selects_prompt_line() {
+    if !tmux_available() {
+        eprintln!("Skipping e2e tmux test because tmux is not available");
+        return;
+    }
+
+    let repo_root = locate_repo_root();
+    ensure_release_binary_exists(&repo_root);
+
+    let socket_name = unique_name("tmux-e2e-sock");
+    let session_name = unique_name("tmux-e2e-session");
+    let (pane_id, session_id, window_id, server_pid) = prepare_isolated_pane(
+        &socket_name,
+        &session_name,
+        "alpha\nbeta\ntmux-easy-motion on  main 🖊\n❯ ",
+    );
+
+    let base = tmp_path("e2e-wrapper");
+    let wrapper_dir = create_tmux_wrapper(&base, &socket_name);
+
+    move_copy_cursor(&socket_name, &pane_id, 0, 0);
+    run_easy_motion_sh_with_injected_key(
+        &repo_root,
+        &wrapper_dir,
+        &server_pid,
+        &session_id,
+        &window_id,
+        &pane_id,
+        "j",
+        "",
+        Some("a"),
+    );
+
+    assert_copy_cursor(&socket_name, &pane_id, 1, 0);
 
     cleanup_tmux(&socket_name);
     let _ = fs::remove_dir_all(base);
