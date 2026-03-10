@@ -4,15 +4,13 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="${CURRENT_DIR}"
 ROOT_DIR="$(cd "${SCRIPTS_DIR}/.." && pwd)"
 BINARY_PATH="${ROOT_DIR}/target/release/tmux-easy-motion"
-RELEASE_VERSION_FILE="${ROOT_DIR}/.release-version"
-INSTALLED_VERSION_FILE="${ROOT_DIR}/target/release/.tmux-easy-motion-version"
 
 CAPTURE_PANE_FILENAME="capture.out"
 JUMP_COMMAND_PIPENAME="jump.pipe"
 
 # GitHub release download settings (replace OWNER/REPO with your fork)
 GITHUB_REPO="NaroZeol/tmux-easy-motion"
-GITHUB_RELEASE_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+GITHUB_RELEASE_DOWNLOAD_BASE="https://github.com/${GITHUB_REPO}/releases/latest/download"
 
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/common_variables.sh"
@@ -46,31 +44,12 @@ detect_platform() {
 }
 
 download_binary() {
-    local platform asset_name binary_url release_json
+    local platform asset_name binary_url
     platform="$(detect_platform)" || return 1
     asset_name="tmux-easy-motion-${platform}"
+    binary_url="${GITHUB_RELEASE_DOWNLOAD_BASE}/${asset_name}"
 
-    # Query latest release
     if ! command -v curl >/dev/null 2>&1; then
-        return 1
-    fi
-
-    release_json=$(curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: tmux-easy-motion' "${GITHUB_RELEASE_API}") || return 1
-    
-    if [[ -z "${release_json}" ]]; then
-        return 1
-    fi
-
-    # Try to extract download URL using jq if available, otherwise use grep/sed
-    if command -v jq >/dev/null 2>&1; then
-        binary_url=$(echo "${release_json}" | jq -r --arg asset_name "${asset_name}" '.assets[] | select(.name == $asset_name) | .browser_download_url' | head -1)
-    else
-        # Fallback to grep parsing for systems without jq
-        # Find the asset block that contains our platform name, then extract browser_download_url
-        binary_url=$(echo "${release_json}" | grep -A 60 "\"name\": \"${asset_name}\"" | grep "browser_download_url" | grep -o "https[^\"]*" | head -1)
-    fi
-    
-    if [[ -z "${binary_url}" ]]; then
         return 1
     fi
 
@@ -96,45 +75,6 @@ build_binary_locally() {
     return 1
 }
 
-read_expected_binary_version() {
-    [[ -f "${RELEASE_VERSION_FILE}" ]] || return 0
-    tr -d '[:space:]' < "${RELEASE_VERSION_FILE}"
-}
-
-read_installed_binary_version() {
-    [[ -f "${INSTALLED_VERSION_FILE}" ]] || return 0
-    awk -F= '
-        /^version=/ {
-            print $2
-            found = 1
-            exit
-        }
-        END {
-            if (!found && NR == 1 && $0 !~ /=/) {
-                print $0
-            }
-        }
-    ' "${INSTALLED_VERSION_FILE}" | tr -d '[:space:]'
-}
-
-mark_binary_version_current() {
-    local expected_version platform
-    expected_version="$(read_expected_binary_version)"
-    platform="$(detect_platform)" || return 1
-
-    {
-        printf 'platform=%s\n' "${platform}"
-        if [[ -n "${expected_version}" ]]; then
-            printf 'version=%s\n' "${expected_version}"
-        fi
-    } > "${INSTALLED_VERSION_FILE}" || return 1
-}
-
-read_installed_binary_platform() {
-    [[ -f "${INSTALLED_VERSION_FILE}" ]] || return 0
-    awk -F= '/^platform=/ { print $2; exit }' "${INSTALLED_VERSION_FILE}" | tr -d '[:space:]'
-}
-
 detect_binary_platform_from_file() {
     local description
     command -v file >/dev/null 2>&1 || return 1
@@ -154,26 +94,9 @@ binary_matches_current_platform() {
     [[ -x "${BINARY_PATH}" ]] || return 1
 
     current_platform="$(detect_platform)" || return 1
-    installed_platform="$(read_installed_binary_platform)"
-    if [[ -z "${installed_platform}" ]]; then
-        installed_platform="$(detect_binary_platform_from_file)"
-    fi
+    installed_platform="$(detect_binary_platform_from_file)"
     [[ -n "${installed_platform}" ]] || return 1
     [[ "${installed_platform}" == "${current_platform}" ]]
-}
-
-binary_is_current() {
-    local expected_version installed_version
-    [[ -x "${BINARY_PATH}" ]] || return 1
-
-    binary_matches_current_platform || return 1
-
-    expected_version="$(read_expected_binary_version)"
-    [[ -n "${expected_version}" ]] || return 0
-
-    installed_version="$(read_installed_binary_version)"
-    [[ -n "${installed_version}" ]] || return 1
-    [[ "${installed_version}" == "${expected_version}" ]]
 }
 
 create_temp_dir() {
@@ -279,13 +202,12 @@ ensure_binary_exists() {
         platform_matches=1
     fi
 
-    if binary_is_current; then
+    if (( binary_exists )) && (( platform_matches )); then
         return 0
     fi
 
-    # Try downloading from GitHub release first (preferred for TPM installations)
+    # Try downloading the exact platform asset from the latest GitHub release first.
     if download_binary; then
-        mark_binary_version_current || return 1
         return 0
     fi
 
@@ -294,7 +216,6 @@ ensure_binary_exists() {
     if [[ "${EASY_MOTION_ALLOW_BUILD}" == "1" ]]; then
         if build_binary_locally; then
             if [[ -x "${BINARY_PATH}" ]]; then
-                mark_binary_version_current || return 1
                 return 0
             fi
         fi
@@ -305,7 +226,7 @@ ensure_binary_exists() {
     fi
 
     # Both download and (optional) build failed
-    tmux display-message "tmux-easy-motion: binary missing or incompatible at ${BINARY_PATH}. Please run 'cd ${ROOT_DIR} && cargo build --release' or reinstall the plugin."
+    tmux display-message "tmux-easy-motion: binary missing or incompatible for this platform at ${BINARY_PATH}. Please run 'cd ${ROOT_DIR} && cargo build --release' or reinstall the plugin."
     return 1
 }
 

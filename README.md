@@ -44,10 +44,11 @@ This plugin entrypoint follows TPM conventions and is provided as:
 tmux-easy-motion.tmux
 ```
 
-On first invocation, if the Rust binary is missing, the plugin automatically:
+On first invocation, if the Rust binary is missing or does not match the current OS/CPU architecture, the plugin automatically:
 
-1. **Download** pre-compiled binary from GitHub release (default: `NaroZeol/tmux-easy-motion`)
-2. **Fallback** to local `cargo build --release` if download fails or curl is unavailable
+1. **Detect** the current platform (`linux-x86_64`, `linux-aarch64`, `macos-x86_64`, or `macos-aarch64`)
+2. **Download** the matching release asset from GitHub (default: `NaroZeol/tmux-easy-motion`)
+3. **Fallback** to local `cargo build --release` if the platform asset is unavailable or download fails
 
 Supported platforms:
 - Linux x86_64 and aarch64 (ARM64)
@@ -197,7 +198,7 @@ git push origin v0.2.0
    - Build binaries for Linux (x86_64, aarch64) and macOS (x86_64, aarch64)
    - Upload them to the GitHub release page
 
-Users will then download these pre-compiled binaries on first plugin invocation.
+Users will then download the matching pre-compiled binary on first plugin invocation. The repository itself no longer stores prebuilt executables.
 
 ## Notes
 

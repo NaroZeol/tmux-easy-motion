@@ -23,3 +23,7 @@ Thumbs.db
 .tmux-easy-motion-*
 *.pipe
 tmp.*/
+/tmux-easy-motion
+
+# virtual environment
+.venv/
